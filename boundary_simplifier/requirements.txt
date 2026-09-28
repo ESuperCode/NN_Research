@@ -1,0 +1,15 @@
+# Core numerical / ML stack
+numpy>=1.24
+scipy>=1.10
+scikit-learn>=1.3      # MLPClassifier, PCA, PolynomialFeatures, RBFSampler,
+                        # LogisticRegression, train_test_split, make_swiss_roll
+scikit-image>=0.21      # skimage.measure.marching_cubes, used to extract the
+                        # 0.5-probability isosurface for the 3D visualization
+
+# No other Python packages are required. Three.js (for the interactive 3D
+# viewer) is loaded by the generated HTML file directly from a CDN in the
+# browser -- it is not a Python dependency and needs no `pip install`.
+# You do need internet access in the BROWSER the first time you open a
+# generated .html file, to fetch:
+#   https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js
+#   https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js

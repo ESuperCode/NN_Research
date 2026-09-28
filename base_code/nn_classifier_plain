@@ -1,0 +1,159 @@
+import numpy as np
+def train_nn(
+    training_data,
+    labels,
+    network_layout,
+    learning_rate=0.01,
+    epochs=1000,
+    batch_size=32,
+    l2_reg=0.0,
+    seed=42,
+    verbose=True,
+    print_every=100,
+):
+    rng = np.random.default_rng(seed)
+
+    X = np.array(training_data, dtype=np.float64)
+    if X.ndim == 1:
+        X = X.reshape(-1, 1)
+
+    unique_classes = sorted(set(labels), key=lambda c: str(c))
+    class_to_index = {c: i for i, c in enumerate(unique_classes)}
+    index_to_class = {i: c for c, i in class_to_index.items()}
+    y_idx = np.array([class_to_index[label] for label in labels], dtype=np.int64)
+    num_classes = len(unique_classes)
+
+    n_samples, n_features = X.shape
+    if network_layout[0] != n_features:
+        raise ValueError(
+            f"network_layout[0] ({network_layout[0]}) must match the number "
+            f"of input features in training_data ({n_features})."
+        )
+
+    input_mean = X.mean(axis=0)
+    input_std = X.std(axis=0)
+    input_std[input_std == 0] = 1.0
+    X = (X - input_mean) / input_std
+
+    Y = np.zeros((n_samples, num_classes))
+    Y[np.arange(n_samples), y_idx] = 1.0
+
+    layer_sizes = list(network_layout) + [num_classes]
+
+    weights = []
+    biases = []
+    for i in range(len(layer_sizes) - 1):
+        fan_in = layer_sizes[i]
+        fan_out = layer_sizes[i + 1]
+        W = rng.normal(0, np.sqrt(2.0 / fan_in), size=(fan_in, fan_out))
+        b = np.zeros((1, fan_out))
+        weights.append(W)
+        biases.append(b)
+
+    def relu(z):
+        return np.maximum(0, z)
+
+    def relu_derivative(z):
+        return (z > 0).astype(np.float64)
+
+    def softmax(z):
+        z_shift = z - np.max(z, axis=1, keepdims=True)
+        exp_z = np.exp(z_shift)
+        return exp_z / np.sum(exp_z, axis=1, keepdims=True)
+
+    n_layers = len(weights)
+
+    for epoch in range(epochs):
+        perm = rng.permutation(n_samples)
+        X_shuffled = X[perm]
+        Y_shuffled = Y[perm]
+
+        for start in range(0, n_samples, batch_size):
+            end = start + batch_size
+            X_batch = X_shuffled[start:end]
+            Y_batch = Y_shuffled[start:end]
+            m = X_batch.shape[0]
+
+            activations = [X_batch]
+            zs = []
+            a = X_batch
+            for i in range(n_layers):
+                z = a @ weights[i] + biases[i]
+                zs.append(z)
+                if i == n_layers - 1:
+                    a = softmax(z)
+                else:
+                    a = relu(z)
+                activations.append(a)
+
+            grads_w = [None] * n_layers
+            grads_b = [None] * n_layers
+
+            delta = (activations[-1] - Y_batch) / m
+
+            for i in reversed(range(n_layers)):
+                a_prev = activations[i]
+                grads_w[i] = a_prev.T @ delta
+                grads_b[i] = np.sum(delta, axis=0, keepdims=True)
+
+                if l2_reg > 0:
+                    grads_w[i] += l2_reg * weights[i]
+
+                if i > 0:
+                    da_prev = delta @ weights[i].T
+                    delta = da_prev * relu_derivative(zs[i - 1])
+
+            for i in range(n_layers):
+                weights[i] -= learning_rate * grads_w[i]
+                biases[i] -= learning_rate * grads_b[i]
+
+        if verbose and (epoch % print_every == 0 or epoch == epochs - 1):
+            a = X
+            for i in range(n_layers):
+                z = a @ weights[i] + biases[i]
+                a = relu(z) if i < n_layers - 1 else softmax(z)
+            eps = 1e-12
+            loss = -np.mean(np.sum(Y * np.log(a + eps), axis=1))
+            preds = np.argmax(a, axis=1)
+            acc = np.mean(preds == y_idx)
+            print(f"Epoch {epoch:5d} | loss: {loss:.4f} | accuracy: {acc:.4f}")
+
+    model = {
+        "weights": weights,
+        "biases": biases,
+        "layout": layer_sizes,
+        "class_to_index": class_to_index,
+        "index_to_class": index_to_class,
+        "input_mean": input_mean,
+        "input_std": input_std,
+    }
+    return model
+def predict_nn(model, input_values):
+    weights = model["weights"]
+    biases = model["biases"]
+    input_mean = model["input_mean"]
+    input_std = model["input_std"]
+    index_to_class = model["index_to_class"]
+
+    x = np.array(input_values, dtype=np.float64).reshape(1, -1)
+    x = (x - input_mean) / input_std
+
+    def relu(z):
+        return np.maximum(0, z)
+
+    def softmax(z):
+        z_shift = z - np.max(z, axis=1, keepdims=True)
+        exp_z = np.exp(z_shift)
+        return exp_z / np.sum(exp_z, axis=1, keepdims=True)
+
+    a = x
+    n_layers = len(weights)
+    for i in range(n_layers):
+        z = a @ weights[i] + biases[i]
+        a = relu(z) if i < n_layers - 1 else softmax(z)
+
+    raw_output = a.flatten().tolist()
+    predicted_index = int(np.argmax(raw_output))
+    predicted_class = index_to_class[predicted_index]
+
+    return predicted_class, raw_output
